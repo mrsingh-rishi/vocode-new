@@ -8,8 +8,7 @@ import sentry_sdk
 import websockets
 from loguru import logger
 from pydantic.v1 import BaseModel, Field
-from websockets.asyncio.client import ClientConnection
-
+from websockets.client import ClientConnection
 from vocode import getenv
 from vocode.streaming.models.audio import AudioEncoding
 from vocode.streaming.models.transcriber import (
