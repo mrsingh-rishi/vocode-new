@@ -279,7 +279,7 @@ async def start_call(request: CallRequest):
             experimental_streaming=True,
             stability=0.75,
             similarity_boost=0.75,
-            model_id="eleven_multilingual_v2",
+            model_id="eleven_flash_v2_5",
             experimental_websocket=True,
             backchannel_amplitude_factor=0.5
         )
