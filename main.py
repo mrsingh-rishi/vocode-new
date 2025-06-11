@@ -275,6 +275,8 @@ async def start_call(request: CallRequest):
         synthesizer_config=ElevenLabsSynthesizerConfig(
             api_key=os.getenv("ELEVEN_LABS_API_KEY"),
             voice_id=os.getenv("ELEVEN_LABS_VOICE_ID", "cjVigY5qzO86Huf0OWal"),
+            sampling_rate=8000,
+            audio_encoding="mulaw",
             optimize_streaming_latency=1,
             experimental_streaming=True,
             stability=0.75,
