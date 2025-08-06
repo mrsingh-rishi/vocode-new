@@ -18,12 +18,14 @@ from vocode.streaming.models.agent import ChatGPTAgentConfig
 from vocode.streaming.models.message import BaseMessage
 from vocode.streaming.models.telephony import TwilioConfig
 from vocode.streaming.telephony.config_manager.redis_config_manager import RedisConfigManager
+from vocode.streaming.telephony.config_manager.in_memory_config_manager import InMemoryConfigManager
 from vocode.streaming.telephony.server.base import TelephonyServer, TwilioInboundCallConfig
 from vocode.streaming.telephony.conversation.outbound_call import OutboundCall
 from vocode.streaming.models.transcriber import AzureTranscriberConfig, DeepgramTranscriberConfig, PunctuationEndpointingConfig
 from vocode.streaming.models.synthesizer import AzureSynthesizerConfig, ElevenLabsSynthesizerConfig
 from vocode.streaming.telephony.server.router.calls import CallsRouter
 from pydantic import BaseModel
+import asyncio
 
 # if running from python, this will load the local .env
 # docker-compose will load the .env file by itself
@@ -222,23 +224,18 @@ async def start_call(request: CallRequest):
         base_url=BASE_URL, # base url must not have https:// or http://
         to_phone=to_phone,
         from_phone=os.environ["TWILIO_PHONE_NUMBER"],
-        config_manager=RedisConfigManager(),
+        config_manager=config_manager,
+        # config_manager=InMemoryConfigManager(),
         agent_config=ChatGPTAgentConfig(
             initial_message=BaseMessage(text='Hi , How are you doing today?'),
             allowed_idle_time_seconds=15,
-            # voicemail_detection=True,
-            # voicemail_text='Seems like i have reached the voicemail,bye',
+            allow_agent_to_be_cut_off=True,
+            interrupt_sensitivity="high",
             model_name='gpt-4o',
             prompt_preamble=BOT_PROMPT,
             generate_responses=True,
-            send_filler_audio=False,
-            # actions=action_list,
-            # vector_db_namespace=vector_db_config.get("namespace") if use_vector_db else None,
-            # vector_db_config=ChromaConfig(index='bajaj-allianz') if use_vector_db else None,
-            # vector_db_config=PineconeConfig(index=os.getenv("PINCONE_INDEX"), api_key=os.getenv("PINECONE_KEY"), api_environment=os.getenv("PINCONE_ENV")) if use_vector_db else None,
+            send_filler_audio=True,
             end_conversation_on_goodbye=True,
-            # ner_prompt='\nYou have to analyse the user-agent conversation given below. You have to detect if the agent has completed its goal or not.\nYou also have to extract the given entities too. \n\nAgent Goal: Test\nEntities to be extracted:\n1. user sentiment\n\nUser-agent conversation: \n<conversation>\n\n\nAlways return output like given below.\nAnalytics= [{"Goal": "True/False"}, {"sentiment":"value"}]\n',
-            # voip_number=False
         ),
         telephony_config=TwilioConfig(
             account_sid=os.environ["TWILIO_ACCOUNT_SID"],
@@ -274,19 +271,19 @@ async def start_call(request: CallRequest):
         # )
         synthesizer_config=ElevenLabsSynthesizerConfig(
             api_key=os.getenv("ELEVEN_LABS_API_KEY"),
-            voice_id=os.getenv("ELEVEN_LABS_VOICE_ID", "cjVigY5qzO86Huf0OWal"),
+            voice_id=os.getenv("ELEVEN_LABS_VOICE_ID", "9BWtsMINqrJLrRacOk9x"),
             sampling_rate=8000,
             audio_encoding="mulaw",
             optimize_streaming_latency=1,
-            experimental_streaming=True,
+            experimental_streaming=False,  # Disable experimental features
             stability=0.75,
             similarity_boost=0.75,
             model_id="eleven_flash_v2_5",
-            experimental_websocket=True,
+            experimental_websocket=False,  # Disable WebSocket due to connectivity issues
             backchannel_amplitude_factor=0.5
         )
     )
-    
     await outbound_call.start()
+    # asyncio.create_task(outbound_call.start())
     logger.info(f"Call started to {to_phone}")
     return {"message": f"Call started to {to_phone}"}
