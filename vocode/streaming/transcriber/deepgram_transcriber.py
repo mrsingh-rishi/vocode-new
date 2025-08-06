@@ -394,7 +394,7 @@ class DeepgramTranscriber(BaseAsyncTranscriber[DeepgramTranscriberConfig]):
 
         try:
             async with websockets.connect(
-                deepgram_url, additional_headers=additional_headers
+                deepgram_url, extra_headers=additional_headers
             ) as ws:
                 self.connected_ts = now()
 
