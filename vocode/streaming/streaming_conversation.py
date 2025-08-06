@@ -971,9 +971,22 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
 
         logger.debug("Finished sending chunks to the output device")
 
-        if processed_events:
-            await processed_events[-1].wait()
+        # if processed_events:
+        #     await processed_events[-1].wait()
 
+        # Calculate audio duration based on chunks sent
+
+        total_chunks = len(processed_events)
+        calculated_audio_duration = total_chunks * seconds_per_chunk
+        
+        # Calculate more precise duration based on actual audio data
+        total_audio_bytes = sum(len(chunk.data) for chunk in audio_chunks)
+        # Get audio encoding info from synthesizer
+        sampling_rate = self.synthesizer.get_synthesizer_config().sampling_rate
+        audio_encoding = self.synthesizer.get_synthesizer_config().audio_encoding
+        bytes_per_second = get_chunk_size_per_second(audio_encoding, sampling_rate)
+        precise_audio_duration = total_audio_bytes / bytes_per_second if bytes_per_second > 0 else calculated_audio_duration
+        self.last_action_timestamp = time.time() + precise_audio_duration
         maybe_first_interrupted_audio_chunk = next(
             (
                 audio_chunk
