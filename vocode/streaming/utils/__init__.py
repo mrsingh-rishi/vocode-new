@@ -1,5 +1,10 @@
 import asyncio
-import audioop
+
+try:
+    import audioop
+except ImportError:
+    import audioop_lts as audioop
+
 import random
 import secrets
 import wave
