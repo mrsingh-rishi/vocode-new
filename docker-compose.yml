@@ -1,0 +1,45 @@
+services:
+  ai-voice-agent:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Required environment variables - set these in your .env file
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ELEVEN_LABS_API_KEY=${ELEVEN_LABS_API_KEY}
+      - ELEVEN_LABS_VOICE_ID=${ELEVEN_LABS_VOICE_ID}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - BASE_URL=${BASE_URL}
+      - NGROK_AUTH_TOKEN=${NGROK_AUTH_TOKEN}
+      # Redis configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    volumes:
+      - ./audio_files:/app/audio_files
+      - ./.env:/app/.env:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - ai-voice-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - ai-voice-network
+
+volumes:
+  redis-data:
+
+networks:
+  ai-voice-network:
+    driver: bridge
