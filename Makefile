@@ -1,4 +1,4 @@
-.PHONY: chat speak listen lint lint_diff test help docker-build docker-run docker-compose-up docker-compose-down docker-logs docker-clean
+.PHONY: chat speak listen lint lint_diff test help docker-build docker-run docker-dev docker-prod docker-compose-up docker-compose-down docker-logs docker-clean
 
 # Development commands
 chat:
@@ -22,10 +22,16 @@ run:
 
 # Docker commands
 docker-build:
-	docker build -t vocode-app .
+	docker build -t ai-voice-agent .
 
 docker-run: docker-build
-	docker run -p 8000:8000 --env-file .env vocode-app
+	docker run -p 8000:8000 --env-file .env ai-voice-agent
+
+docker-dev:
+	docker-compose up --build -d
+
+docker-prod:
+	docker-compose -f docker-compose.prod.yml up --build -d
 
 docker-compose-up:
 	docker-compose up --build
@@ -40,7 +46,7 @@ docker-logs:
 	docker-compose logs -f
 
 docker-logs-app:
-	docker-compose logs -f vocode-app
+	docker-compose logs -f ai-voice-agent
 
 docker-logs-redis:
 	docker-compose logs -f redis
@@ -110,6 +116,8 @@ help:
 	@echo "Docker:"
 	@echo "  docker-build       Build Docker image"
 	@echo "  docker-run         Build and run Docker container"
+	@echo "  docker-dev         Start development stack (detached)"
+	@echo "  docker-prod        Start production stack (detached)"
 	@echo "  docker-compose-up  Build and run with docker-compose"
 	@echo "  docker-compose-up-detached  Run detached with docker-compose"
 	@echo "  docker-compose-down Stop docker-compose services"
