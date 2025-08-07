@@ -1,0 +1,23 @@
+{
+  "to_phone": "+1234567890",
+  "env_vars": {
+    "twilio_account_sid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "twilio_auth_token": "your_twilio_auth_token_here",
+    "twilio_phone_number": "+1987654321",
+    "openai_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "deepgram_api_key": "your_deepgram_api_key_here",
+    "eleven_labs_api_key": "your_elevenlabs_api_key_here"
+  },
+  "agent": {
+    "type": "chatgpt",
+    "config": {}
+  },
+  "transcriber": {
+    "type": "deepgram", 
+    "config": {}
+  },
+  "synthesizer": {
+    "type": "eleven_labs",
+    "config": {}
+  }
+}
