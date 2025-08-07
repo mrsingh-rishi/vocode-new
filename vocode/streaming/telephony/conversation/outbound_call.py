@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from loguru import logger
 
@@ -37,6 +37,7 @@ class OutboundCall:
             str
         ] = None,  # Keys to press when the call connects, see send_digits https://www.twilio.com/docs/voice/api/call-resource#create-a-call-resource
         output_to_speaker: bool = False,
+        webhooks: Optional[List[str]] = None,  # List of webhook URLs for call events
     ):
         self.base_url = base_url
         self.to_phone = to_phone
@@ -52,6 +53,7 @@ class OutboundCall:
         self.output_to_speaker = output_to_speaker
         self.sentry_tags = sentry_tags
         self.digits = digits
+        self.webhooks = webhooks or []
 
     def create_telephony_client(self) -> AbstractTelephonyClient:
         if isinstance(self.telephony_config, TwilioConfig):
@@ -105,6 +107,7 @@ class OutboundCall:
                 sentry_tags=self.sentry_tags,
                 telephony_params=self.telephony_params,
                 direction="outbound",
+                webhooks=self.webhooks,
             )
         elif isinstance(self.telephony_client, VonageClient):
             call_config = VonageCallConfig(
@@ -119,10 +122,22 @@ class OutboundCall:
                 sentry_tags=self.sentry_tags,
                 telephony_params=self.telephony_params,
                 direction="outbound",
+                webhooks=self.webhooks,
             )
         else:
             raise ValueError("Unknown telephony client")
+        webhook_payload = {
+            "webhooks": self.webhooks,
+        }
         await self.config_manager.save_config(self.conversation_id, call_config)
+        await self.config_manager.save_webhooks(self.telephony_id, webhook_payload)
+        
+        return {
+            "telephony_id": self.telephony_id,
+            "conversation_id": self.conversation_id,
+            "to_phone": self.to_phone,
+            "from_phone": self.from_phone,
+        }
 
     async def end(self):
         return await self.telephony_client.end_call(self.telephony_id)

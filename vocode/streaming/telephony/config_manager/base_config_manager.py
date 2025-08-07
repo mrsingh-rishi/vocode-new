@@ -12,3 +12,9 @@ class BaseConfigManager:
 
     async def delete_config(self, conversation_id):
         raise NotImplementedError
+    
+    async def save_webhooks(self, id: str, config: dict):
+        raise NotImplementedError
+    
+    async def get_webhooks(self, id: str) -> Optional[dict]:
+        raise NotImplementedError
