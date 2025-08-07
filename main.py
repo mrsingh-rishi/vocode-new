@@ -1,36 +1,50 @@
 # Standard library imports
 import os
 import sys
+from typing import Dict, Any, Optional, Union
 
 from dotenv import load_dotenv
 
 # Third-party imports
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from loguru import logger
 from pyngrok import ngrok
 
-# # Local application/library specific imports
-# from speller_agent import SpellerAgentFactory
-
-# from vocode.streaming.models.synthesizer import BotSentiment
+# Vocode imports
 from vocode.logging import configure_pretty_logging
-from vocode.streaming.models.agent import ChatGPTAgentConfig
 from vocode.streaming.models.message import BaseMessage
 from vocode.streaming.models.telephony import TwilioConfig
 from vocode.streaming.telephony.config_manager.redis_config_manager import RedisConfigManager
 from vocode.streaming.telephony.config_manager.in_memory_config_manager import InMemoryConfigManager
 from vocode.streaming.telephony.server.base import TelephonyServer, TwilioInboundCallConfig
 from vocode.streaming.telephony.conversation.outbound_call import OutboundCall
-from vocode.streaming.models.transcriber import AzureTranscriberConfig, DeepgramTranscriberConfig, PunctuationEndpointingConfig
-from vocode.streaming.models.synthesizer import AzureSynthesizerConfig, ElevenLabsSynthesizerConfig
 from vocode.streaming.telephony.server.router.calls import CallsRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 import asyncio
 
-# if running from python, this will load the local .env
-# docker-compose will load the .env file by itself
-load_dotenv()
+# Agent configurations
+from vocode.streaming.models.agent import (
+    ChatGPTAgentConfig, AnthropicAgentConfig, GroqAgentConfig, 
+    ChatVertexAIAgentConfig, EchoAgentConfig, LLMAgentConfig
+)
 
+# Transcriber configurations
+from vocode.streaming.models.transcriber import (
+    AzureTranscriberConfig, DeepgramTranscriberConfig, GoogleTranscriberConfig,
+    AssemblyAITranscriberConfig, WhisperCPPTranscriberConfig, RevAITranscriberConfig,
+    GladiaTranscriberConfig, PunctuationEndpointingConfig, TimeEndpointingConfig
+)
+
+# Synthesizer configurations
+from vocode.streaming.models.synthesizer import (
+    AzureSynthesizerConfig, ElevenLabsSynthesizerConfig, GoogleSynthesizerConfig,
+    RimeSynthesizerConfig, CoquiSynthesizerConfig, PlayHtSynthesizerConfig,
+    GTTSSynthesizerConfig, BarkSynthesizerConfig, PollySynthesizerConfig,
+    CartesiaSynthesizerConfig
+)
+
+# Load environment variables
+load_dotenv()
 configure_pretty_logging()
 
 app = FastAPI(docs_url=None)
@@ -52,6 +66,7 @@ if not BASE_URL:
 if not BASE_URL:
     raise ValueError("BASE_URL must be set in environment if not using pyngrok")
 
+# Set up telephony server with basic inbound call handling
 telephony_server = TelephonyServer(
     base_url=BASE_URL,
     config_manager=config_manager,
@@ -63,20 +78,12 @@ telephony_server = TelephonyServer(
                 prompt_preamble="Have a pleasant conversation about life",
                 generate_responses=True,
             ),
-            # uncomment this to use the speller agent instead
-            # agent_config=SpellerAgentConfig(
-            #     initial_message=BaseMessage(
-            #         text="im a speller agent, say something to me and ill spell it out for you"
-            #     ),
-            #     generate_responses=False,
-            # ),
             twilio_config=TwilioConfig(
                 account_sid=os.environ["TWILIO_ACCOUNT_SID"],
                 auth_token=os.environ["TWILIO_AUTH_TOKEN"],
             ),
         )
     ],
-    # agent_factory=SpellerAgentFactory(),
 )
 
 router = APIRouter()
@@ -89,7 +96,8 @@ router.include_router(
 
 app.include_router(router=router)
 
-BOT_PROMPT = """
+# Default bot prompt
+DEFAULT_BOT_PROMPT = """
 Role:
 You are a native American lead debt relief consultant with 10 years of experience. You are connected with prospects on a phone call and you are cold calling them. Your voice carries the calm authority of a financial advisor who's helped hundreds save money. Talk like a relatable US native.
 Core Mission:
@@ -106,184 +114,405 @@ If a user asks to stop calling, end call and say good bye
 In case user says they don't have any debt, end call and say good bye
 In case of call back or not interested scenario, try to convince the user with rebuttals two to three times.
 Never respond to users on the queries which are not related to the script.
-**The "3-Second Benefit Reboot" Flow**
-1. Welcome Pitch (Must Complete):
-If the user interrupts in between, make sure a welcome pitch is delivered.
-2. If Interrupted During Benefits (Must Complete):
-If the user interrupts during the value proposition, briefly acknowledge and answer and then pivot back to benefits using conversational bridging.
-Core Objective:
-Qualify at all costs: Extract debt amount, card count, and employment status.
-Call Flow Rules
-Welcome Pitch:
-My name is Nicole and I'm calling from Consumer Services… So I'm reaching out to you today because per our records it looks like you still have more than ten thousand dollars in credit card debt and you've been making your monthly payments on time. Right?"
-If user denies by saying like “no” or “wrong” then treat like “not interested” objection handling and try to pull back in the  Educate → Qualify → Transfer flow 
-Once user confirms build interest in program:
-OK, thank you.
-So based on your track record of making payments and your situation, um, your total debts can be reduced by like, twenty to forty percent, and you'll be on a zero interest monthly payment plan.
-So for example, if you owe $20,000, you'll save $8000, which you don't have to pay back ever....
-That's your savings.
-So you'll end up paying only half of what you owe.
-Not only that, but, um, your monthly payments can also be reduced by almost half as well....
-And the best part is if you qualify, we'll save you like hundreds and thousands of dollars in future interest rates and finance charges as we eliminate them completely.
-This will help you get out of debt much faster instead of, you know, paying it off for years.
-So uh this is just a free consultation call, and I was wondering, do you handle the bills and take care of these credit cards by yourself or not?
-Qualification (Force Answers):
-Ask in sequence (ignore tangents):
-So I was wondering, do you handle the bills and take care of these credit cards by yourself or not?
-If No: "Please transfer me to whoever does—this could save your household thousands.
-So we actually have a bunch of plans that go from, like, twelve to thirty-six months, and the monthly payments can be pretty low. To give you more information about these lower monthly payment options could you give me a rough idea of how much you owe on all your credit cards combined? Just a ballpark figure, like ten thousand, twenty thousand, or maybe more?
-And on how many credit cards do you owe this balance? Just a rough estimate off the top of your head… two, three, four, or more?
-And are you currently employed, self-employed, or retired?
-Transfer the call to a debt counselor agent. (Only If All Answers Provided):
-Immediately say:
-OK, all right. Thanks for your answers. These are the only information needed. We have multiple options where your savings can be significant, and your monthly payments can be considerably lower.  Now it's our turn to get you more information on lower monthly payment plans and savings. Please hold for a few seconds and I will be right back. Once again, it's a free consultation with no obligation. Please hold on...
-Note: when triggering transfer no need to explicitly say that "I am transferring the call to the human agent.” Just say the above lines only.
-Lead not qualified (If debt amount is less than $10000)
--Capture the amount of credit card debt from the lead and if the amount is less than $10,000, ask for personal loans under collection.
--Properly close the call if the benchmark of $10,000 is not crossed from all 3 combined (credit card debt, personal loans under collection).
-**If the customer states that their debt is over $150,000 , conclude the call with the following statement and say good bye  - "Thank you for letting me know, this program is designed for debts below $150,000. I appreciate your time today and I hope you find the right solution for your situation."**
-Objection Handling (Answer Contextually and bring back to the call flow)
-Objections Right at the Start:
-**“Who are you?”/“What’s this about?”/“Why are you calling me?”**
-“Sure — I’m Nicole, and I’m with Consumer Services. We help individuals who may be struggling with high-interest unsecured debt — things like credit cards or loans. The reason for the call is simple: based on some recent financial data or inquiries, you might qualify for a program that could help you reduce or settle your debt for much less than what you owe. Just takes a minute to check — no pressure.”
-Go to qualifying questions…. 
-- **I don't have any debt.**  
-“That's great to hear! Just to confirm, you don't have any unsecured debt like credit cards, or personal loans over $10,000?”
-- **How did you get my informations?**
-“That’s a good question. Your info likely came through a financial inquiry you made online — like a debt help form, loan search, or credit evaluation. We only reach out to people who've shown interest in financial relief options. We’re not cold calling at random.”
-- **If They’re Angry or Suspicious:**
-“Totally understand the concern — we don’t cold-call out of the blue. Your information came through a financial lead partner where someone expressed interest in debt relief options. If you’d like, I can mark your file as not interested and remove it immediately.”
-- **“I’m not interested.”**
-“Totally understand — just curious, is that because you’ve already resolved your debts or just not sure what this is about yet? A lot of people say the same thing until they hear how much they might be able to save — this only takes a couple minutes, and if it’s not helpful, no pressure.”
-- **“You’re calling me again and again” / “I get calls from your company every day”**
-“I’m sorry if it’s felt excessive — that’s definitely not our intention. We’re just reaching out to individuals who showed potential eligibility for debt relief, and sometimes the system tries multiple times if we don’t get through. I can mark you as not interested if you'd prefer — but before I do that, would you like to just quickly hear if you qualify? It could save you thousands.”
-- **“Is this a scam?”**
-“I get it — the phone world is wild these days. We’re a licensed service provider, and this isn’t a sales pitch. Our goal is just to walk you through legitimate debt reduction options available under federal and state programs. You’re not agreeing to anything today — just getting the info you deserve to know.”
-- **If user say he/she has already joined some program
-“That's great — glad you’re already taking action. Can I ask how long you’ve been working with them? Sometimes people compare what they’re enrolled in with our program and find we can actually reduce the monthly payments or shorten the term.” [Carry on with the pitching...]
-- **“How will you do that for me?” (Meaning: How can you save me money on my debts?)**
-“Totally understand — here’s how it works: based on your current debt and income, we connect you to a program that helps lower the overall amount you’re responsible for and rolls everything into one manageable monthly plan. No loans, no credit pulls — just a smarter way to get back in control.”
-- **Wrong number / Not the right party?**  
-We provide free advice on lowering credit card interest rates and balances. If you owe money on credit cards, I'm happy to help.
-- **None of your business.**  
-I'm offering free advice on reducing debt and eliminating future interest rates. It's a no-obligation call.
-- **Company address or phone number?**  
-We are based in Boca Raton, Florida, and licensed in 49 states. I can connect you with a debt counsellor for more specific details.
-- **How does the program work?**  
-We use debt mediation techniques with pre-negotiated rates to reduce your debts, working with any creditor.
-- **Everything in writing?**  
-Once prequalified, you'll receive tailored information to review, and I'm here for any real-time questions.
-- **My name is on the do-not-call list.**  
-  I'm sorry for calling. I'll add you to our do-not-call list.
-- **Do I need to close all my cards?**  
-You can choose which cards to keep or close. Our goal is to reduce your debt, and closing most of them will help you get out of debt faster. 
-- **How do you save 40%?**  
-We negotiate with creditors to reduce debts based on our relationships, pre-negotiated rates, and industry trends.
-- **Tax consequences?**  
-Credit card companies usually don't report forgiven debt to the IRS, but consult a CPA if you receive a 1099 form.
-1. TRUST / CREDIBILITY OBJECTIONS
-"Why are you calling me?" Rebuttal: "I’m calling because based on recent activity or indicators, you might be eligible for a program that could help lower or restructure your unsecured debts. It only takes a minute to check."
-"Are you a bot?" Rebuttal: "I am a virtual assistant working for consumer services."
-2. FINANCIAL OBJECTIONS
-"I can’t afford anything right now." Rebuttal: "That’s exactly why we’re calling. If you’re struggling, this program is designed to reduce your overall monthly obligation — not add to it. It’s not a loan — it’s a way to regain control."
-"What’s the catch?" Rebuttal: "There’s no catch — just an option for individuals in hardship to lower what they owe and make it manageable again. We’re simply checking to see if you qualify."
-"You’re just going to charge me for something I can do myself." Rebuttal: "Some people do try on their own, but they usually don’t get the same results. Our team works with creditors every day and knows how to make these programs work in your favor."
-3. INTEREST / TIMING OBJECTIONS
-"I’m not interested." Rebuttal: "I hear that a lot. Just to clarify — have you already resolved your credit card balances, or are they still active? If you still owe over $7,000, this might be worth hearing for 60 seconds."
-"Call me later." Rebuttal: "I completely understand! Just so you know, our programs are based on real-time availability, and options can change quickly. While I have you on the line, it only takes a few minutes to review your options and see if we can help you save thousand of dollars. If it makes sense, great—if not, at least you’ll have the information. Does that sound fair?"
-If YES - Continue pitching
-If NO - I totally understand, but this might be the best time to go over it briefly. I can keep it short—just a couple of minutes—and then you can decide if you want to continue the discussion later
-If YES - Continue pitching
-If still says NO, schedule a callback” 
-"I’ve already got this handled." Rebuttal: "That’s great — may I ask who you’re working with? Sometimes people compare and realize they can save more or shorten the term with our program."
-4. DEFENSIVE / EMOTIONAL OBJECTIONS
-"Stop calling me!" Rebuttal: "I understand — and I’ll make sure we remove you from follow-ups. Just before I do that, have you already resolved your credit card debt? If not, you might be missing a real opportunity."
-"You guys call me every day." Rebuttal: "I truly apologize — the system may retry if we haven’t connected yet. If you’d like, I can mark you as not interested, or we can take just one minute to see if this might actually help."
-5. PROCESS & CLARITY OBJECTIONS
-"How will you do that for me?" Rebuttal: "We connect you to programs that help reduce what you owe and roll your debt into one simplified, affordable plan based on your current situation. No loan, no upfront cost — just a smarter way to tackle debt."
-"Will this hurt my credit?" Rebuttal: "Your credit may be impacted, but most people we help already have high balances affecting their score. Our goal is long-term improvement — not a quick fix."
-"Is this a loan?" Rebuttal: "Nope — it’s not a loan. There’s no new credit line. We simply work with what you currently owe and restructure it into something manageable."
 """
 
+# Configuration mapping for agent types
+AGENT_CONFIG_MAP = {
+    "chatgpt": ChatGPTAgentConfig,
+    "anthropic": AnthropicAgentConfig,
+    "groq": GroqAgentConfig,
+    "vertex_ai": ChatVertexAIAgentConfig,
+    "echo": EchoAgentConfig,
+    "llm": LLMAgentConfig
+}
+
+# Configuration mapping for transcriber types
+TRANSCRIBER_CONFIG_MAP = {
+    "azure": AzureTranscriberConfig,
+    "deepgram": DeepgramTranscriberConfig,
+    "google": GoogleTranscriberConfig,
+    "assembly_ai": AssemblyAITranscriberConfig,
+    "whisper_cpp": WhisperCPPTranscriberConfig,
+    "rev_ai": RevAITranscriberConfig,
+    "gladia": GladiaTranscriberConfig
+}
+
+# Configuration mapping for synthesizer types
+SYNTHESIZER_CONFIG_MAP = {
+    "azure": AzureSynthesizerConfig,
+    "eleven_labs": ElevenLabsSynthesizerConfig,
+    "google": GoogleSynthesizerConfig,
+    "rime": RimeSynthesizerConfig,
+    "coqui": CoquiSynthesizerConfig,
+    "play_ht": PlayHtSynthesizerConfig,
+    "gtts": GTTSSynthesizerConfig,
+    "bark": BarkSynthesizerConfig,
+    "polly": PollySynthesizerConfig,
+    "cartesia": CartesiaSynthesizerConfig
+}
+
+class EnvironmentVariables(BaseModel):
+    """Environment variables that can be overridden in request"""
+    # Twilio config
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_phone_number: Optional[str] = None
+    
+    # OpenAI config
+    openai_api_key: Optional[str] = None
+    openai_api_base: Optional[str] = None
+    
+    # Azure config
+    azure_speech_key: Optional[str] = None
+    azure_speech_region: Optional[str] = None
+    azure_openai_api_key: Optional[str] = None
+    azure_openai_endpoint: Optional[str] = None
+    
+    # Anthropic config
+    anthropic_api_key: Optional[str] = None
+    
+    # Google config
+    google_credentials_path: Optional[str] = None
+    google_application_credentials: Optional[str] = None
+    
+    # Deepgram config
+    deepgram_api_key: Optional[str] = None
+    
+    # ElevenLabs config
+    eleven_labs_api_key: Optional[str] = None
+    eleven_labs_voice_id: Optional[str] = None
+    
+    # Groq config
+    groq_api_key: Optional[str] = None
+    
+    # Other service configs
+    play_ht_api_key: Optional[str] = None
+    play_ht_user_id: Optional[str] = None
+    rime_api_key: Optional[str] = None
+    assembly_ai_api_key: Optional[str] = None
+    rev_ai_api_key: Optional[str] = None
+    gladia_api_key: Optional[str] = None
+    cartesia_api_key: Optional[str] = None
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_region: Optional[str] = None
+
+class AgentConfiguration(BaseModel):
+    """Agent configuration that can be any supported agent type"""
+    type: str  # chatgpt, anthropic, groq, vertex_ai, echo, llm
+    config: Dict[str, Any] = {}  # Configuration specific to the agent type
+
+class TranscriberConfiguration(BaseModel):
+    """Transcriber configuration that can be any supported transcriber type"""
+    type: str  # azure, deepgram, google, assembly_ai, whisper_cpp, rev_ai, gladia
+    config: Dict[str, Any] = {}  # Configuration specific to the transcriber type
+
+class SynthesizerConfiguration(BaseModel):
+    """Synthesizer configuration that can be any supported synthesizer type"""
+    type: str  # azure, eleven_labs, google, rime, coqui, play_ht, gtts, bark, polly, cartesia
+    config: Dict[str, Any] = {}  # Configuration specific to the synthesizer type
+
+class TelephonyConfiguration(BaseModel):
+    """Telephony configuration"""
+    type: str = "twilio"  # Currently only twilio is supported
+    config: Dict[str, Any] = {}  # Telephony configuration
+
+def get_env_value(request_env_vars: Optional[EnvironmentVariables], key: str, env_key: str) -> str:
+    """Get environment variable value with fallback logic"""
+    # First try from request env_vars
+    if request_env_vars:
+        value = getattr(request_env_vars, key, None)
+        if value:
+            return value
+    
+    # Fallback to system environment variable
+    value = os.getenv(env_key)
+    if value:
+        return value
+    
+    # If neither exists, raise error
+    raise HTTPException(
+        status_code=400, 
+        detail=f"Required environment variable '{env_key}' not found in request or system environment"
+    )
+
+def create_agent_config(agent_config: Optional[AgentConfiguration], prompt_preamble: Optional[str], initial_message: Optional[str], env_vars: Optional[EnvironmentVariables]):
+    """Create agent configuration based on the specified type"""
+    if not agent_config:
+        # Default to ChatGPT agent
+        agent_config = AgentConfiguration(
+            type="chatgpt",
+            config={}
+        )
+    
+    if agent_config.type not in AGENT_CONFIG_MAP:
+        raise HTTPException(status_code=400, detail=f"Unsupported agent type: {agent_config.type}")
+    
+    agent_class = AGENT_CONFIG_MAP[agent_config.type]
+    config_dict = agent_config.config.copy()
+    
+    # Set default values
+    if prompt_preamble:
+        config_dict["prompt_preamble"] = prompt_preamble
+    elif "prompt_preamble" not in config_dict:
+        config_dict["prompt_preamble"] = DEFAULT_BOT_PROMPT
+    
+    if initial_message:
+        config_dict["initial_message"] = BaseMessage(text=initial_message)
+    elif "initial_message" not in config_dict:
+        config_dict["initial_message"] = BaseMessage(text="Hi, How are you doing today?")
+    
+    # Set common defaults
+    config_dict.setdefault("generate_responses", True)
+    config_dict.setdefault("send_filler_audio", True)
+    config_dict.setdefault("end_conversation_on_goodbye", True)
+    config_dict.setdefault("allow_agent_to_be_cut_off", True)
+    config_dict.setdefault("allowed_idle_time_seconds", 15)
+    config_dict.setdefault("interrupt_sensitivity", "high")
+    
+    # Set API keys based on agent type
+    if agent_config.type == "chatgpt" and "openai_api_key" not in config_dict:
+        try:
+            config_dict["openai_api_key"] = get_env_value(env_vars, "openai_api_key", "OPENAI_API_KEY")
+        except:
+            pass  # Some agents might not need API keys
+    elif agent_config.type == "anthropic" and "api_key" not in config_dict:
+        try:
+            config_dict["api_key"] = get_env_value(env_vars, "anthropic_api_key", "ANTHROPIC_API_KEY")
+        except:
+            pass
+    elif agent_config.type == "groq" and "api_key" not in config_dict:
+        try:
+            config_dict["api_key"] = get_env_value(env_vars, "groq_api_key", "GROQ_API_KEY")
+        except:
+            pass
+    
+    # Set model defaults
+    if agent_config.type == "chatgpt" and "model_name" not in config_dict:
+        config_dict["model_name"] = "gpt-4o"
+    
+    return agent_class(**config_dict)
+
+def create_transcriber_config(transcriber_config: Optional[TranscriberConfiguration], env_vars: Optional[EnvironmentVariables]):
+    """Create transcriber configuration based on the specified type"""
+    if not transcriber_config:
+        # Default to Deepgram transcriber
+        transcriber_config = TranscriberConfiguration(
+            type="deepgram",
+            config={}
+        )
+    
+    if transcriber_config.type not in TRANSCRIBER_CONFIG_MAP:
+        raise HTTPException(status_code=400, detail=f"Unsupported transcriber type: {transcriber_config.type}")
+    
+    transcriber_class = TRANSCRIBER_CONFIG_MAP[transcriber_config.type]
+    config_dict = transcriber_config.config.copy()
+    
+    # Set common defaults
+    config_dict.setdefault("sampling_rate", 8000)
+    config_dict.setdefault("audio_encoding", "mulaw")
+    config_dict.setdefault("chunk_size", 3200)
+    config_dict.setdefault("language", "en")
+    config_dict.setdefault("mute_during_speech", False)
+    
+    # Set endpointing config if not provided
+    if "endpointing_config" not in config_dict:
+        config_dict["endpointing_config"] = PunctuationEndpointingConfig()
+    
+    # Set API keys based on transcriber type
+    if transcriber_config.type == "deepgram" and "api_key" not in config_dict:
+        config_dict["api_key"] = get_env_value(env_vars, "deepgram_api_key", "DEEPGRAM_API_KEY")
+        if "model" not in config_dict:
+            config_dict["model"] = "nova-2"
+    elif transcriber_config.type == "azure" and "speech_key" not in config_dict:
+        config_dict["speech_key"] = get_env_value(env_vars, "azure_speech_key", "AZURE_SPEECH_KEY")
+        config_dict["speech_region"] = get_env_value(env_vars, "azure_speech_region", "AZURE_SPEECH_REGION")
+    elif transcriber_config.type == "assembly_ai" and "api_key" not in config_dict:
+        config_dict["api_key"] = get_env_value(env_vars, "assembly_ai_api_key", "ASSEMBLY_AI_API_KEY")
+    elif transcriber_config.type == "rev_ai" and "api_key" not in config_dict:
+        config_dict["api_key"] = get_env_value(env_vars, "rev_ai_api_key", "REV_AI_API_KEY")
+    elif transcriber_config.type == "gladia" and "api_key" not in config_dict:
+        config_dict["api_key"] = get_env_value(env_vars, "gladia_api_key", "GLADIA_API_KEY")
+    
+    return transcriber_class(**config_dict)
+
+def create_synthesizer_config(synthesizer_config: Optional[SynthesizerConfiguration], env_vars: Optional[EnvironmentVariables]):
+    """Create synthesizer configuration based on the specified type"""
+    if not synthesizer_config:
+        # Default to ElevenLabs synthesizer
+        synthesizer_config = SynthesizerConfiguration(
+            type="eleven_labs",
+            config={}
+        )
+    
+    if synthesizer_config.type not in SYNTHESIZER_CONFIG_MAP:
+        raise HTTPException(status_code=400, detail=f"Unsupported synthesizer type: {synthesizer_config.type}")
+    
+    synthesizer_class = SYNTHESIZER_CONFIG_MAP[synthesizer_config.type]
+    config_dict = synthesizer_config.config.copy()
+    
+    # Set common defaults
+    config_dict.setdefault("sampling_rate", 8000)
+    config_dict.setdefault("audio_encoding", "mulaw")
+    
+    # Set API keys and defaults based on synthesizer type
+    if synthesizer_config.type == "eleven_labs":
+        config_dict["api_key"] = get_env_value(env_vars, "eleven_labs_api_key", "ELEVEN_LABS_API_KEY")
+        if "voice_id" not in config_dict:
+            try:
+                config_dict["voice_id"] = get_env_value(env_vars, "eleven_labs_voice_id", "ELEVEN_LABS_VOICE_ID")
+            except:
+                config_dict["voice_id"] = "9BWtsMINqrJLrRacOk9x"  # Default voice
+        
+        config_dict.setdefault("optimize_streaming_latency", 1)
+        config_dict.setdefault("experimental_streaming", False)
+        config_dict.setdefault("stability", 0.75)
+        config_dict.setdefault("similarity_boost", 0.75)
+        config_dict.setdefault("model_id", "eleven_flash_v2_5")
+        config_dict.setdefault("experimental_websocket", False)
+        config_dict.setdefault("backchannel_amplitude_factor", 0.5)
+        
+    elif synthesizer_config.type == "azure":
+        config_dict["speech_key"] = get_env_value(env_vars, "azure_speech_key", "AZURE_SPEECH_KEY")
+        config_dict["speech_region"] = get_env_value(env_vars, "azure_speech_region", "AZURE_SPEECH_REGION")
+        config_dict.setdefault("voice_name", "en-US-SteffanNeural")
+        config_dict.setdefault("pitch", 0)
+        config_dict.setdefault("rate", 15)
+        config_dict.setdefault("language_code", "en-US")
+        
+    elif synthesizer_config.type == "play_ht":
+        config_dict["api_key"] = get_env_value(env_vars, "play_ht_api_key", "PLAY_HT_API_KEY")
+        config_dict["user_id"] = get_env_value(env_vars, "play_ht_user_id", "PLAY_HT_USER_ID")
+        
+    elif synthesizer_config.type == "rime":
+        config_dict["api_key"] = get_env_value(env_vars, "rime_api_key", "RIME_API_KEY")
+        
+    elif synthesizer_config.type == "cartesia":
+        config_dict["api_key"] = get_env_value(env_vars, "cartesia_api_key", "CARTESIA_API_KEY")
+        
+    elif synthesizer_config.type == "polly":
+        config_dict["aws_access_key_id"] = get_env_value(env_vars, "aws_access_key_id", "AWS_ACCESS_KEY_ID")
+        config_dict["aws_secret_access_key"] = get_env_value(env_vars, "aws_secret_access_key", "AWS_SECRET_ACCESS_KEY")
+        config_dict.setdefault("region_name", get_env_value(env_vars, "aws_region", "AWS_REGION"))
+    
+    return synthesizer_class(**config_dict)
+
+def create_telephony_config(telephony_config: Optional[TelephonyConfiguration], env_vars: Optional[EnvironmentVariables]):
+    """Create telephony configuration"""
+    if not telephony_config:
+        telephony_config = TelephonyConfiguration(
+            type="twilio",
+            config={}
+        )
+    
+    if telephony_config.type == "twilio":
+        config_dict = telephony_config.config.copy()
+        config_dict["account_sid"] = get_env_value(env_vars, "twilio_account_sid", "TWILIO_ACCOUNT_SID")
+        config_dict["auth_token"] = get_env_value(env_vars, "twilio_auth_token", "TWILIO_AUTH_TOKEN")
+        return TwilioConfig(**config_dict)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported telephony type: {telephony_config.type}")
+
 class CallRequest(BaseModel):
+    # Required fields
     to_phone: str
+    
+    # Optional environment variables override
+    env_vars: Optional[EnvironmentVariables] = None
+    
+    # Service configurations (with sensible defaults)
+    agent: Optional[AgentConfiguration] = None
+    transcriber: Optional[TranscriberConfiguration] = None
+    synthesizer: Optional[SynthesizerConfiguration] = None
+    telephony: Optional[TelephonyConfiguration] = None
+    
+    # Call-specific settings
+    base_url: Optional[str] = None
+    from_phone: Optional[str] = None
+    prompt_preamble: Optional[str] = None
+    initial_message: Optional[str] = None
 
 @app.post("/start_call")
 async def start_call(request: CallRequest):
-    """Starts a call to the given phone number.
+    """Starts a configurable call to the given phone number.
 
     Args:
-        request (CallRequest): A request body containing the phone number to call.
+        request (CallRequest): A request body containing all call configuration.
 
     Returns:
         dict: A message indicating that the call has been started.
     """
-    to_phone = request.to_phone
-    
-    outbound_call = OutboundCall(
-        base_url=BASE_URL, # base url must not have https:// or http://
-        to_phone=to_phone,
-        from_phone=os.environ["TWILIO_PHONE_NUMBER"],
-        config_manager=config_manager,
-        # config_manager=InMemoryConfigManager(),
-        agent_config=ChatGPTAgentConfig(
-            initial_message=BaseMessage(text='Hi , How are you doing today?'),
-            allowed_idle_time_seconds=15,
-            allow_agent_to_be_cut_off=True,
-            interrupt_sensitivity="high",
-            model_name='gpt-4o',
-            prompt_preamble=BOT_PROMPT,
-            generate_responses=True,
-            send_filler_audio=True,
-            end_conversation_on_goodbye=True,
-        ),
-        telephony_config=TwilioConfig(
-            account_sid=os.environ["TWILIO_ACCOUNT_SID"],
-            auth_token=os.environ["TWILIO_AUTH_TOKEN"],
-            # phone_number=os.environ["TWILIO_PHONE_NUMBER"],
-        ),
-        # transcriber_config=AzureTranscriberConfig(
-        #     language="en-US",
-        #     sampling_rate=8000,
-        #     audio_encoding="mulaw",
-        #     chunk_size=20 * 160
-        # ),
-        transcriber_config=DeepgramTranscriberConfig(
-            sampling_rate=8000,
-            audio_encoding="mulaw",
-            chunk_size=3200,
-            model="nova-2",
-            endpointing_config=PunctuationEndpointingConfig(),
-            language='en',
-            mute_during_speech=False,
-        ),
-        # synthesizer_config=AzureSynthesizerConfig(
-        #     sampling_rate=8000,
-        #     audio_encoding="mulaw",
-        #     voice_name='en-GB-NoahNeural',
-        #     pitch = 0,
-        #     rate = 15,
-        #     language_code = 'en-US',
-        #     # bot_sentiment = BotSentiment(emotion="conversation"),
-        #     # pronunciation_dict={},
-        #     # speech_region=os.getenv("AZURE_SPEECH_REGION"),
-        #     # api_key=os.getenv("AZURE_SPEECH_KEY")
-        # )
-        synthesizer_config=ElevenLabsSynthesizerConfig(
-            api_key=os.getenv("ELEVEN_LABS_API_KEY"),
-            voice_id=os.getenv("ELEVEN_LABS_VOICE_ID", "9BWtsMINqrJLrRacOk9x"),
-            sampling_rate=8000,
-            audio_encoding="mulaw",
-            optimize_streaming_latency=1,
-            experimental_streaming=False,  # Disable experimental features
-            stability=0.75,
-            similarity_boost=0.75,
-            model_id="eleven_flash_v2_5",
-            experimental_websocket=False,  # Disable WebSocket due to connectivity issues
-            backchannel_amplitude_factor=0.5
+    try:
+        # Use provided base_url or fall back to global BASE_URL
+        call_base_url = request.base_url or BASE_URL
+        
+        # Get from_phone from env_vars, request, or system environment
+        from_phone = request.from_phone
+        if not from_phone:
+            from_phone = get_env_value(request.env_vars, "twilio_phone_number", "TWILIO_PHONE_NUMBER")
+        
+        # Create configurations using helper functions
+        agent_config = create_agent_config(
+            request.agent, 
+            request.prompt_preamble, 
+            request.initial_message, 
+            request.env_vars
         )
-    )
-    await outbound_call.start()
-    # asyncio.create_task(outbound_call.start())
-    logger.info(f"Call started to {to_phone}")
-    return {"message": f"Call started to {to_phone}"}
+        
+        transcriber_config = create_transcriber_config(
+            request.transcriber, 
+            request.env_vars
+        )
+        
+        synthesizer_config = create_synthesizer_config(
+            request.synthesizer, 
+            request.env_vars
+        )
+        
+        telephony_config = create_telephony_config(
+            request.telephony, 
+            request.env_vars
+        )
+        
+        # Create and start the outbound call
+        outbound_call = OutboundCall(
+            base_url=call_base_url,
+            to_phone=request.to_phone,
+            from_phone=from_phone,
+            config_manager=config_manager,
+            agent_config=agent_config,
+            telephony_config=telephony_config,
+            transcriber_config=transcriber_config,
+            synthesizer_config=synthesizer_config
+        )
+        
+        await outbound_call.start()
+        logger.info(f"Call started to {request.to_phone} with custom configuration")
+        
+        return {
+            "message": f"Call started to {request.to_phone}",
+            "configuration": {
+                "agent_type": request.agent.type if request.agent else "chatgpt",
+                "transcriber_type": request.transcriber.type if request.transcriber else "deepgram",
+                "synthesizer_type": request.synthesizer.type if request.synthesizer else "eleven_labs",
+                "telephony_type": request.telephony.type if request.telephony else "twilio"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting call: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start call: {str(e)}")
+
+@app.get("/supported_services")
+async def get_supported_services():
+    """Get list of all supported service types"""
+    return {
+        "agents": list(AGENT_CONFIG_MAP.keys()),
+        "transcribers": list(TRANSCRIBER_CONFIG_MAP.keys()),
+        "synthesizers": list(SYNTHESIZER_CONFIG_MAP.keys()),
+        "telephony": ["twilio"]
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=3000)
