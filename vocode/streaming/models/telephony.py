@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Dict, Literal, Optional, Union, List
 
 from vocode.streaming.models.agent import AgentConfig
 from vocode.streaming.models.model import BaseModel, TypedModel
@@ -104,7 +104,7 @@ class BaseCallConfig(TypedModel, type=CallConfigType.BASE.value):  # type: ignor
     conference: bool = False
     telephony_params: Optional[Dict[str, str]] = None
     direction: PhoneCallDirection
-
+    webhooks: Optional[List[str]] = None  # List of webhook URLs for call events
     @staticmethod
     def default_transcriber_config():
         raise NotImplementedError

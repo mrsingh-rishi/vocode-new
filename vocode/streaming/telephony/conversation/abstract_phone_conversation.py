@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Literal, Optional, TypeVar, Union
+from typing import Literal, Optional, TypeVar, Union, List
 
 from fastapi import WebSocket
 from loguru import logger
@@ -49,6 +49,7 @@ class AbstractPhoneConversation(StreamingConversation[TelephonyOutputDeviceType]
         conversation_id: Optional[str] = None,
         events_manager: Optional[EventsManager] = None,
         speed_coefficient: float = 1.0,
+        webhooks: Optional[List[str]] = None,  # List of webhook URLs for call events
     ):
         conversation_id = conversation_id or create_conversation_id()
         ctx_conversation_id.set(conversation_id)
@@ -65,6 +66,7 @@ class AbstractPhoneConversation(StreamingConversation[TelephonyOutputDeviceType]
             conversation_id=conversation_id,
             events_manager=events_manager,
             speed_coefficient=speed_coefficient,
+            webhooks=webhooks,
         )
         self.config_manager = config_manager
 

@@ -1,7 +1,7 @@
 # Standard library imports
 import os
 import sys
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 
 from dotenv import load_dotenv
 
@@ -432,6 +432,8 @@ class CallRequest(BaseModel):
     prompt_preamble: Optional[str] = None
     initial_message: Optional[str] = None
 
+    webhooks: Optional[List[str]] = None  # List of webhook URLs for call events
+
 @app.post("/start_call")
 async def start_call(request: CallRequest):
     """Starts a configurable call to the given phone number.
@@ -483,10 +485,11 @@ async def start_call(request: CallRequest):
             agent_config=agent_config,
             telephony_config=telephony_config,
             transcriber_config=transcriber_config,
-            synthesizer_config=synthesizer_config
+            synthesizer_config=synthesizer_config,
+            webhooks=request.webhooks or [],
         )
         
-        await outbound_call.start()
+        response = await outbound_call.start()
         logger.info(f"Call started to {request.to_phone} with custom configuration")
         
         return {
@@ -496,7 +499,12 @@ async def start_call(request: CallRequest):
                 "transcriber_type": request.transcriber.type if request.transcriber else "deepgram",
                 "synthesizer_type": request.synthesizer.type if request.synthesizer else "eleven_labs",
                 "telephony_type": request.telephony.type if request.telephony else "twilio"
-            }
+            },
+            "execution_id": response.get("conversation_id"),
+            "telephony_id": response.get("telephony_id"),
+            "to_phone": request.to_phone,
+            "from_phone": from_phone,
+            "webhooks": request.webhooks or []
         }
         
     except Exception as e:

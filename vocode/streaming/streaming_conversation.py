@@ -19,6 +19,7 @@ from typing import (
     TypeVar,
     Union,
 )
+import requests
 
 import sentry_sdk
 from loguru import logger
@@ -594,6 +595,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         speed_coefficient: float = 1.0,
         conversation_id: Optional[str] = None,
         events_manager: Optional[EventsManager] = None,
+        webhooks: Optional[List[str]] = None,  # List of webhook URLs for call events
     ):
         self.id = conversation_id or create_conversation_id()
         ctx_conversation_id.set(self.id)
@@ -684,7 +686,7 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         self.idle_time_threshold = (
             self.agent.get_agent_config().allowed_idle_time_seconds or ALLOWED_IDLE_TIME
         )
-
+        self.webhooks = webhooks or []
         self.interrupt_lock = asyncio.Lock()
 
     def create_state_manager(self) -> ConversationStateManager:
@@ -1052,7 +1054,110 @@ class StreamingConversation(AudioPipeline[OutputDeviceType]):
         if self.actions_worker is not None:
             logger.debug("Terminating actions worker")
             await self.actions_worker.terminate()
+
+        conversation_dict = self.get_transcript_as_dict()
+        asyncio_create_task(self.send_data_through_webhooks(conversation_dict))
         logger.debug("Successfully terminated")
+
+    async def send_data_through_webhooks(self, conversation_dict: dict):
+        """Sends data to all configured webhooks."""
+        if not self.webhooks or len(self.webhooks) == 0:
+            logger.debug("No webhooks configured, skipping webhook notification")
+            return
+        payload = {
+            "event_type": "transcript",
+            "transcript": conversation_dict,
+            "execution_id": self.id,
+            "start_time": self.transcript.start_time if hasattr(self.transcript, 'start_time') else None,
+            "end_time": self.end_time if self.end_time else time.time(),
+            "duration_seconds": time.time() - (self.transcript.start_time if hasattr(self.transcript, 'start_time') else 0),
+            "human_speaking": self.is_human_speaking,
+            "is_terminated": self.is_terminated.is_set(),
+        }
+        # Send to webhooks (implementation needed)
+        logger.debug(f"Sending transcript data: {conversation_dict}")
+        logger.debug(f"Payload for webhooks: {payload}")
+
+        for webhook in self.webhooks:
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    logger.debug(f"Sending data to webhook: {webhook} (attempt {attempt + 1}/{max_retries})")
+                    response = requests.post(webhook, json=payload, timeout=10)
+                    if response.status_code == 200:
+                        logger.debug(f"Successfully sent data to webhook {webhook}")
+                        break  # Success, no need to retry
+                    else:
+                        logger.warning(f"Failed to send data to webhook {webhook}, status code: {response.status_code} (attempt {attempt + 1}/{max_retries})")
+                    if attempt == max_retries - 1:
+                            logger.error(f"Failed to send data to webhook {webhook} after {max_retries} attempts")
+                except Exception as e:
+                    logger.warning(f"Failed to send data to webhook {webhook}: {e} (attempt {attempt + 1}/{max_retries})")
+                    if attempt == max_retries - 1:
+                        logger.error(f"Failed to send data to webhook {webhook} after {max_retries} attempts: {e}")
+            
+            # Wait before retry (exponential backoff)
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # 1, 2, 4, 8 seconds
+                logger.debug(f"Waiting {wait_time} seconds before retry...")
+                time.sleep(wait_time)
+        
+    def get_transcript_as_dict(self) -> dict:
+        """Convert transcript to dictionary format."""
+        conversation_data = {
+            "conversation_id": self.id,
+            "start_time": self.transcript.start_time,
+            "events": [],
+            "summary": {
+                "total_messages": 0,
+                "human_messages": 0,
+                "bot_messages": 0,
+                "actions": 0,
+                "duration_seconds": time.time() - self.transcript.start_time if hasattr(self.transcript, 'start_time') else 0
+            }
+        }
+        
+        for event in self.transcript.event_logs:
+            event_dict = {
+                "timestamp": event.timestamp,
+                "relative_time": event.timestamp - self.transcript.start_time,
+                "sender": event.sender.value if hasattr(event.sender, 'value') else str(event.sender),
+                "type": type(event).__name__
+            }
+            
+            if isinstance(event, Message):
+                event_dict.update({
+                    "text": event.text,
+                    "is_final": event.is_final,
+                    "is_backchannel": event.is_backchannel,
+                    "is_end_of_turn": event.is_end_of_turn
+                })
+                conversation_data["summary"]["total_messages"] += 1
+                if event.sender.value == "human":
+                    conversation_data["summary"]["human_messages"] += 1
+                elif event.sender.value == "bot":
+                    conversation_data["summary"]["bot_messages"] += 1
+                    
+            elif hasattr(event, 'action_type'):  # ActionStart or ActionFinish
+                event_dict.update({
+                    "action_type": event.action_type,
+                    "action_input": event.action_input.dict() if hasattr(event.action_input, 'dict') else str(event.action_input)
+                })
+                if hasattr(event, 'action_output'):
+                    event_dict["action_output"] = event.action_output.dict() if hasattr(event.action_output, 'dict') else str(event.action_output)
+                conversation_data["summary"]["actions"] += 1
+                
+            elif hasattr(event, 'conference_event_type'):  # ConferenceEvent
+                event_dict.update({
+                    "conference_event_type": event.conference_event_type,
+                    "conference_event_role": event.conference_event_role,
+                    "participant_phone_number": event.participant_phone_number
+                })
+            
+            conversation_data["events"].append(event_dict)
+        
+        return conversation_data
+        
 
     def is_active(self):
         return not self.is_terminated.is_set()

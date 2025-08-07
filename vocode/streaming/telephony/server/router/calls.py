@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 
 import sentry_sdk
 from fastapi import APIRouter, HTTPException, WebSocket
@@ -56,6 +56,7 @@ class CallsRouter(BaseRouter):
         agent_factory: AbstractAgentFactory = DefaultAgentFactory(),
         synthesizer_factory: AbstractSynthesizerFactory = DefaultSynthesizerFactory(),
         events_manager: Optional[EventsManager] = None,
+        webhooks: Optional[List[str]] = None,
     ) -> AbstractPhoneConversation:
         if isinstance(call_config, TwilioCallConfig):
             return TwilioPhoneConversation(
@@ -74,6 +75,7 @@ class CallsRouter(BaseRouter):
                 synthesizer_factory=synthesizer_factory,
                 events_manager=events_manager,
                 direction=call_config.direction,
+                webhooks=webhooks or [],
             )
         elif isinstance(call_config, VonageCallConfig):
             return VonagePhoneConversation(
@@ -93,6 +95,7 @@ class CallsRouter(BaseRouter):
                 events_manager=events_manager,
                 output_to_speaker=call_config.output_to_speaker,
                 direction=call_config.direction,
+                webhooks=webhooks or [],
             )
         else:
             raise ValueError(f"Unknown call config type {call_config.type}")
@@ -115,6 +118,7 @@ class CallsRouter(BaseRouter):
                 agent_factory=self.agent_factory,
                 synthesizer_factory=self.synthesizer_factory,
                 events_manager=self.events_manager,
+                webhooks= call_config.webhooks if call_config.webhooks else [],
             )
 
             await phone_conversation.attach_ws_and_start(websocket)

@@ -6,7 +6,7 @@ from redis import Redis
 from vocode.streaming.models.telephony import BaseCallConfig
 from vocode.streaming.telephony.config_manager.base_config_manager import BaseConfigManager
 from vocode.streaming.utils.redis import initialize_redis
-
+import json
 
 class RedisConfigManager(BaseConfigManager):
     def __init__(self):
@@ -19,6 +19,17 @@ class RedisConfigManager(BaseConfigManager):
     async def save_config(self, conversation_id: str, config: BaseCallConfig):
         logger.debug(f"Saving config for {conversation_id}")
         await self._set_with_one_day_expiration(conversation_id, config.json())
+    
+    async def save_webhooks(self, id: str, config: dict):
+        logger.debug(f"Saving webhooks for {id}")
+        await self._set_with_one_day_expiration(id, json.dumps(config))
+
+    async def get_webhooks(self, id: str) -> Optional[dict]:
+        logger.debug(f"Getting webhooks for {id}")
+        raw_config = await self.redis.get(id)  # type: ignore
+        if raw_config:
+            return json.loads(raw_config)
+        return None
 
     async def get_config(self, conversation_id) -> Optional[BaseCallConfig]:
         logger.debug(f"Getting config for {conversation_id}")

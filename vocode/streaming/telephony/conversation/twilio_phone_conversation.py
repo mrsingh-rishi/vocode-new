@@ -2,7 +2,7 @@ import base64
 import json
 import os
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import WebSocket
 from loguru import logger
@@ -55,6 +55,7 @@ class TwilioPhoneConversation(AbstractPhoneConversation[TwilioOutputDevice]):
         record_call: bool = False,
         speed_coefficient: float = 1.0,
         noise_suppression: bool = False,  # is currently a no-op
+        webhooks: Optional[List[str]] = None,  # List of webhook URLs for call events
     ):
         super().__init__(
             direction=direction,
@@ -72,6 +73,7 @@ class TwilioPhoneConversation(AbstractPhoneConversation[TwilioOutputDevice]):
             agent_factory=agent_factory,
             synthesizer_factory=synthesizer_factory,
             speed_coefficient=speed_coefficient,
+            webhooks=webhooks,
         )
         self.config_manager = config_manager
         self.twilio_config = twilio_config or TwilioConfig(
