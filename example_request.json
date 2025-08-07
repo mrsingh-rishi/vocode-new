@@ -1,0 +1,42 @@
+{
+  "to_phone": "+1234567890",
+  "env_vars": {
+    "twilio_account_sid": "your-twilio-account-sid",
+    "twilio_auth_token": "your-twilio-auth-token",
+    "twilio_phone_number": "+1987654321",
+    "openai_api_key": "your-openai-api-key",
+    "eleven_labs_api_key": "your-elevenlabs-api-key",
+    "eleven_labs_voice_id": "your-voice-id",
+    "deepgram_api_key": "your-deepgram-api-key"
+  },
+  "agent": {
+    "type": "chatgpt",
+    "config": {
+      "model_name": "gpt-4o",
+      "temperature": 0.7,
+      "max_tokens": 150
+    }
+  },
+  "transcriber": {
+    "type": "deepgram",
+    "config": {
+      "model": "nova-2",
+      "language": "en-US",
+      "smart_format": true
+    }
+  },
+  "synthesizer": {
+    "type": "eleven_labs",
+    "config": {
+      "model_id": "eleven_flash_v2_5",
+      "stability": 0.8,
+      "similarity_boost": 0.8
+    }
+  },
+  "telephony": {
+    "type": "twilio",
+    "config": {}
+  },
+  "prompt_preamble": "You are a helpful AI assistant making a phone call. Be friendly and professional.",
+  "initial_message": "Hi there! This is an AI assistant calling to help you today."
+}

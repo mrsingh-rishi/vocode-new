@@ -1,0 +1,34 @@
+{
+  "to_phone": "+1234567890",
+  "env_vars": {
+    "twilio_account_sid": "your-twilio-account-sid",
+    "twilio_auth_token": "your-twilio-auth-token", 
+    "twilio_phone_number": "+1987654321",
+    "anthropic_api_key": "your-anthropic-api-key",
+    "azure_speech_key": "your-azure-speech-key",
+    "azure_speech_region": "your-azure-region"
+  },
+  "agent": {
+    "type": "anthropic",
+    "config": {
+      "model_name": "claude-3-sonnet-20240229",
+      "max_tokens": 200
+    }
+  },
+  "transcriber": {
+    "type": "azure",
+    "config": {
+      "language": "en-US"
+    }
+  },
+  "synthesizer": {
+    "type": "azure", 
+    "config": {
+      "voice_name": "en-US-JennyNeural",
+      "speaking_rate": 1.1,
+      "pitch": 5
+    }
+  },
+  "prompt_preamble": "You are Claude, an AI assistant by Anthropic. You're making a customer service call.",
+  "initial_message": "Hello! I'm Claude, calling from customer service. How can I help you today?"
+}
